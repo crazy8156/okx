@@ -1,0 +1,12 @@
+ccxt
+pandas
+python-dotenv
+ta-lib
+fastapi
+uvicorn
+websockets
+jinja2
+python-multipart
+feedparser
+textblob
+aiohttp
