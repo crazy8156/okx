@@ -14,6 +14,8 @@ class TrendRSIStrategy(StrategyBase):
         self.entry_price = 0
         self.sl_pct = 0.03 # 3%
         self.tp_pct = 0.06 # 6%
+        self.rsi_buy_thresh = 30 # Buy when RSI < 30
+        self.rsi_sell_thresh = 70 # Sell when RSI > 70
 
     async def update(self):
         """Fetches data and updates indicators."""
@@ -45,7 +47,7 @@ class TrendRSIStrategy(StrategyBase):
             "rsi": last.get('rsi', 0),
             "next_action": self.get_next_action(last),
             "target_price": last.get('sma_20', 0),
-            "strategy_name": "Trend-RSI (SMA20 + RSI)"
+            "strategy_name": f"Trend-RSI (Strict < {self.rsi_buy_thresh})"
         }
         
         if self.position:
@@ -69,30 +71,32 @@ class TrendRSIStrategy(StrategyBase):
         
         # Entry Logic
         if not self.position:
-            if price > sma and rsi < 50:
+            if price > sma and rsi < self.rsi_buy_thresh:
                 return "✅ 買入訊號 (Long Entry)"
-            elif price < sma and rsi > 50:
+            elif price < sma and rsi > self.rsi_sell_thresh:
                 return "🔻 賣出訊號 (Short Entry)"
-            return "等待趨勢與 RSI 條件..."
+            return f"等待訊號 (RSI < {self.rsi_buy_thresh} 或 > {self.rsi_sell_thresh})"
             
         # Exit Logic (Position Management)
         if self.position == 'LONG':
-            if price <= self.entry_price * (1 - self.sl_pct):
-                return "🛑 出場: 止損 (-3%)"
+            sl_price = self.entry_price * (1 - self.sl_pct)
+            if price <= sl_price:
+                return f"🛑 出場: 觸發止損 {self.sl_pct*100}% (< {sl_price:.2f})"
             if price >= self.entry_price * (1 + self.tp_pct):
-                return "💰 出場: 止盈 (+6%)"
-            if rsi > 70:
-                return "⚡ 出場: RSI 超買 (>70)"
-            return f"持有多單 (成本: {self.entry_price})"
+                return f"💰 出場: 止盈 (+{self.tp_pct*100}%)"
+            if rsi > self.rsi_sell_thresh:
+                return f"⚡ 出場: RSI 超買 (>{self.rsi_sell_thresh})"
+            return f"持有多單 (止損價: {sl_price:.2f})"
             
         if self.position == 'SHORT':
-            if price >= self.entry_price * (1 + self.sl_pct):
-                return "🛑 出場: 止損 (-3%)"
+            sl_price = self.entry_price * (1 + self.sl_pct)
+            if price >= sl_price:
+                return f"🛑 出場: 觸發止損 {self.sl_pct*100}% (> {sl_price:.2f})"
             if price <= self.entry_price * (1 - self.tp_pct):
-                return "💰 出場: 止盈 (+6%)"
-            if rsi < 30:
-                return "⚡ 出場: RSI 超賣 (<30)"
-            return f"持有空單 (成本: {self.entry_price})"
+                return f"💰 出場: 止盈 (+{self.tp_pct*100}%)"
+            if rsi < self.rsi_buy_thresh:
+                return f"⚡ 出場: RSI 超賣 (<{self.rsi_buy_thresh})"
+            return f"持有空單 (止損價: {sl_price:.2f})"
             
         return "等待中..."
 
@@ -108,11 +112,15 @@ class TrendRSIStrategy(StrategyBase):
         
         # Entry Signal (ONLY IF NO CURRENT POSITION)
         if not self.position:
-            if price > sma and rsi < 50:
+            # Stricter Condition: RSI < 30 (Oversold) AND Up-Trend (Price > SMA) ??
+            # Actually normally "Trend Following" buys when Price > SMA.
+            # "RSI Dip" buys when RSI is low.
+            # Combining them: Price is above SMA (Uptrend) but pulled back (RSI low).
+            if price > sma and rsi < self.rsi_buy_thresh:
                 self.position = 'LONG'
                 self.entry_price = price
                 return 'BUY'
-            elif price < sma and rsi > 50:
+            elif price < sma and rsi > self.rsi_sell_thresh:
                 self.position = 'SHORT'
                 self.entry_price = price
                 return 'SELL'
@@ -128,7 +136,7 @@ class TrendRSIStrategy(StrategyBase):
                 self.position = None
                 return 'SELL'
             # RSI Exit
-            if rsi > 70:
+            if rsi > self.rsi_sell_thresh:
                 self.position = None
                 return 'SELL'
                 
@@ -142,7 +150,7 @@ class TrendRSIStrategy(StrategyBase):
                 self.position = None
                 return 'BUY'
             # RSI Exit
-            if rsi < 30:
+            if rsi < self.rsi_buy_thresh:
                 self.position = None
                 return 'BUY'
                 
