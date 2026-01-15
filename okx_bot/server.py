@@ -379,37 +379,78 @@ class BotController:
         }
     
     def calculate_daily_realized_pnl(self):
-        """Calculates estimated realized PnL for trades occurring today (Local Time)."""
+        """Calculates realized PnL for trades occurring today using FIFO matching."""
         try:
-            from datetime import datetime
+            from datetime import datetime, timezone
+            # Use Local Time for 'Today' definition as requested by typical users
             today = datetime.now().date()
             
-            today_buys_vol = 0
-            today_buys_cost = 0
-            today_sells_vol = 0
-            today_sells_rev = 0
+            # 1. Sort trades by time (Oldest First) for FIFO
+            # self.trades is currently Newest First, so reverse it
+            sorted_trades = sorted(self.trades, key=lambda x: x['time'])
             
-            for t in self.trades:
-                # Trade time is in ms
-                trade_dt = datetime.fromtimestamp(t['time'] / 1000)
-                if trade_dt.date() == today:
-                    price = float(t['price'])
-                    amount = float(t['amount'])
-                    if t['side'] == 'BUY':
-                        today_buys_vol += amount
-                        today_buys_cost += (price * amount)
-                    elif t['side'] == 'SELL':
-                        today_sells_vol += amount
-                        today_sells_rev += (price * amount)
+            inventory = [] # List of {'price': float, 'amount': float}
+            daily_realized_pnl = 0.0
             
-            # Simple Matching (Min Volume)
-            matched_vol = min(today_buys_vol, today_sells_vol)
-            if matched_vol > 0:
-                avg_buy = today_buys_cost / today_buys_vol
-                avg_sell = today_sells_rev / today_sells_vol
-                realized_pnl = (avg_sell - avg_buy) * matched_vol
-                return realized_pnl
-            return 0.0
+            for t in sorted_trades:
+                # Parse Time
+                trade_ts = t['time']
+                if isinstance(trade_ts, str):
+                    try:
+                        dt = datetime.fromisoformat(trade_ts)
+                    except:
+                        # Fallback for ISO strings potentially
+                        continue
+                else:
+                    # Milliseconds integer
+                    dt = datetime.fromtimestamp(trade_ts / 1000)
+                
+                is_today = (dt.date() == today)
+                
+                side = t['side'].upper()
+                price = float(t['price'])
+                amount = float(t['amount'])
+                
+                if side == 'BUY':
+                    # Add to inventory
+                    inventory.append({'price': price, 'amount': amount})
+                
+                elif side == 'SELL':
+                    # Match against inventory (FIFO)
+                    qty_to_fill = amount
+                    cost_basis = 0.0
+                    
+                    while qty_to_fill > 0 and inventory:
+                        batch = inventory[0]
+                        
+                        if batch['amount'] > qty_to_fill:
+                            # Partial fill from this batch
+                            cost_basis += (batch['price'] * qty_to_fill)
+                            batch['amount'] -= qty_to_fill # Reduce batch
+                            qty_to_fill = 0
+                            # Batch remains in inventory with reduced amount
+                        else:
+                            # Full consumption of this batch
+                            cost_basis += (batch['price'] * batch['amount'])
+                            qty_to_fill -= batch['amount']
+                            inventory.pop(0) # Remove batch
+                            
+                    # If inventory ran out but we still sold (Shorting or missing history), 
+                    # we assume entry price = current exit price (0 PnL) for the remainder to avoid huge skew,
+                    # or just ignore. For now, let's assume 0 profit on unmatched part.
+                    if qty_to_fill > 0:
+                        cost_basis += (price * qty_to_fill)
+                        
+                    # Revenue from this sell
+                    revenue = price * amount
+                    trade_pnl = revenue - cost_basis
+                    
+                    # Accumulate ONLY if this Sell happened TODAY
+                    if is_today:
+                        daily_realized_pnl += trade_pnl
+                        
+            return daily_realized_pnl
+            
         except Exception as e:
             print(f"⚠️ Daily PnL Calc Error: {e}")
             return 0.0
