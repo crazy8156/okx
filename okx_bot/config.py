@@ -26,6 +26,10 @@ class Config:
     # CryptoPanic API Key
     CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY")
 
+    # AI Settings
+    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+    AI_MODEL_NAME = os.getenv("AI_MODEL_NAME", "gemini-pro")
+
     def validate(self):
         if not all([self.API_KEY, self.SECRET_KEY, self.PASSPHRASE]):
             raise ValueError("Missing API credentials. Please set OKX_API_KEY, OKX_SECRET_KEY, and OKX_PASSPHRASE in .env file.")
